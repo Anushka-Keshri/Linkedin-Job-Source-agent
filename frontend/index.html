@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LinkedIn Job Source Agent</title>
+  <meta name="description" content="Paste a LinkedIn job URL and instantly discover the company name, website, and their career page."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0d14;
+      --surface:   #111622;
+      --card:      #161d2e;
+      --border:    rgba(255,255,255,0.07);
+      --accent:    #4f8ef7;
+      --accent2:   #7c3aed;
+      --glow:      rgba(79,142,247,0.25);
+      --text:      #e8eaf0;
+      --muted:     #6b7280;
+      --success:   #10b981;
+      --error:     #f87171;
+      --radius:    14px;
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    /* ── Animated gradient background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(79,142,247,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 90%, rgba(124,58,237,0.10) 0%, transparent 55%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Grid dots ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ── */
+    .page {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+      gap: 40px;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(79,142,247,0.12);
+      border: 1px solid rgba(79,142,247,0.3);
+      border-radius: 999px;
+      padding: 5px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .badge .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    h1 {
+      font-size: clamp(28px, 5vw, 48px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #e8eaf0 30%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.15;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 460px;
+    }
+
+    /* ── Search card ── */
+    .search-card {
+      width: 100%;
+      max-width: 640px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) + 4px);
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 20px 60px rgba(0,0,0,0.4);
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    input[type="url"] {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      padding: 12px 16px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="url"]::placeholder { color: #3d4557; }
+
+    input[type="url"]:focus {
+      border-color: rgba(79,142,247,0.5);
+      box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
+    }
+
+    button#searchBtn {
+      background: linear-gradient(135deg, var(--accent), #3b6fd4);
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      border-radius: var(--radius);
+      padding: 12px 24px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
+      box-shadow: 0 4px 20px rgba(79,142,247,0.3);
+    }
+
+    button#searchBtn:hover:not(:disabled) {
+      opacity: 0.9;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 28px rgba(79,142,247,0.45);
+    }
+
+    button#searchBtn:active:not(:disabled) { transform: translateY(0); }
+
+    button#searchBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Status / loader ── */
+    #status {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+      padding: 10px 0 0;
+    }
+
+    #status.visible { display: flex; }
+
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(79,142,247,0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error banner ── */
+    #errorBox {
+      display: none;
+      background: rgba(248,113,113,0.08);
+      border: 1px solid rgba(248,113,113,0.25);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--error);
+      line-height: 1.5;
+    }
+
+    #errorBox.visible { display: block; }
+
+    /* ── Results ── */
+    #results {
+      width: 100%;
+      max-width: 640px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      animation: fadeUp 0.4s ease;
+    }
+
+    #results.visible { display: flex; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .results-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--success);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .results-header svg { flex-shrink: 0; }
+
+    .result-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .result-card:hover {
+      border-color: rgba(79,142,247,0.25);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+    }
+
+    .card-icon {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 17px;
+    }
+
+    .icon-company  { background: rgba(79,142,247,0.12); }
+    .icon-website  { background: rgba(16,185,129,0.12); }
+    .icon-career   { background: rgba(124,58,237,0.12); }
+
+    .card-body { flex: 1; min-width: 0; }
+
+    .card-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .card-value {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text);
+      word-break: break-all;
+    }
+
+    .card-value a {
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .card-value a:hover { color: #7db4ff; text-decoration: underline; }
+
+    .copy-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+      align-self: center;
+    }
+
+    .copy-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .copy-btn.copied { color: var(--success); border-color: rgba(16,185,129,0.3); }
+
+    /* ── Footer ── */
+    footer {
+      position: relative; z-index: 1;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      padding-bottom: 24px;
+    }
+
+    footer span { opacity: 0.5; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="badge"><span class="dot"></span>AI-Powered Agent</div>
+    <h1>LinkedIn Job Source Agent</h1>
+    <p class="subtitle">Paste a LinkedIn job URL and instantly find the company's name, official website, and careers page.</p>
+  </div>
+
+  <!-- Search card -->
+  <div class="search-card">
+    <label for="urlInput">LinkedIn Job URL</label>
+    <div class="input-row">
+      <input
+        type="url"
+        id="urlInput"
+        placeholder="https://www.linkedin.com/jobs/view/4427787182/"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="searchBtn" onclick="runSearch()">Search</button>
+    </div>
+
+    <!-- Loader -->
+    <div id="status">
+      <div class="spinner"></div>
+      <span id="statusText">Running pipeline… this may take 30–60 seconds.</span>
+    </div>
+
+    <!-- Error -->
+    <div id="errorBox"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results">
+    <div class="results-header">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      Results found
+    </div>
+
+    <!-- Company Name -->
+    <div class="result-card">
+      <div class="card-icon icon-company">🏢</div>
+      <div class="card-body">
+        <div class="card-label">Company Name</div>
+        <div class="card-value" id="resName">—</div>
+      </div>
+      <button class="copy-btn" onclick="copyValue('resName', this)">Copy</button>
+    </div>
+
+    <!-- Company Website -->
+    <div class="result-card">
+      <div class="card-icon icon-website">🌐</div>
+      <div class="card-body">
+        <div class="card-label">Company Website</div>
+        <div class="card-value" id="resWebsite">—</div>
+      </div>
+      <button class="copy-btn" onclick="copyValue('resWebsite', this)">Copy</button>
+    </div>
+
+    <!-- Career / Job Listing Page -->
+    <div class="result-card">
+      <div class="card-icon icon-career">💼</div>
+      <div class="card-body">
+        <div class="card-label">Career / Job Listing Page</div>
+        <div class="card-value" id="resListing">—</div>
+      </div>
+      <button class="copy-btn" onclick="copyValue('resListing', this)">Copy</button>
+    </div>
+  </div>
+
+</div>
+
+<footer><span>LinkedIn Job Source Agent &mdash; powered by Apify &amp; Groq</span></footer>
+
+<script>
+  const urlInput   = document.getElementById('urlInput');
+  const searchBtn  = document.getElementById('searchBtn');
+  const status     = document.getElementById('status');
+  const statusText = document.getElementById('statusText');
+  const errorBox   = document.getElementById('errorBox');
+  const results    = document.getElementById('results');
+
+  // Allow pressing Enter to trigger search
+  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+
+  function setLoading(on) {
+    searchBtn.disabled = on;
+    status.classList.toggle('visible', on);
+    if (on) {
+      errorBox.classList.remove('visible');
+      results.classList.remove('visible');
+    }
+  }
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.classList.add('visible');
+  }
+
+  function setLink(elementId, url) {
+    const el = document.getElementById(elementId);
+    el.innerHTML = `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(url)}</a>`;
+  }
+
+  function setText(elementId, text) {
+    document.getElementById(elementId).textContent = text;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async function runSearch() {
+    const url = urlInput.value.trim();
+    if (!url) {
+      showError('Please enter a LinkedIn job URL.');
+      return;
+    }
+
+    setLoading(true);
+    statusText.textContent = 'Running pipeline… this may take 30–60 seconds.';
+
+    try {
+      const res = await fetch('/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        showError(data.error || 'An unknown error occurred.');
+        return;
+      }
+
+      // Populate results
+      setText('resName', data.company_name || '—');
+      if (data.company_website) setLink('resWebsite', data.company_website);
+      else setText('resWebsite', '—');
+      if (data.listing_url) setLink('resListing', data.listing_url);
+      else setText('resListing', '—');
+
+      results.classList.add('visible');
+
+    } catch (err) {
+      showError('Could not reach the server. Make sure app.py is running.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function copyValue(elementId, btn) {
+    const el = document.getElementById(elementId);
+    const text = el.querySelector('a') ? el.querySelector('a').href : el.textContent;
+    if (!text || text === '—') return;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    });
+  }
+</script>
+</body>
+</html>
