@@ -142,7 +142,7 @@ def _fetch_company_name(client: ApifyClient, job_id: str, source_url: str) -> st
         raise ApifyAPIError(
             f"Actor '{_JOB_DETAIL_ACTOR_ID}' failed to start or timed out: {exc}"
         ) from exc
-
+    logger.info("RAW RUN TYPE: %s | RAW RUN: %r", type(run), run)
     run_status = str(getattr(run, "status", "UNKNOWN"))
     if run_status != "SUCCEEDED":
         raise ApifyAPIError(
