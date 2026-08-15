@@ -142,15 +142,15 @@ def _fetch_company_name(client: ApifyClient, job_id: str, source_url: str) -> st
         raise ApifyAPIError(
             f"Actor '{_JOB_DETAIL_ACTOR_ID}' failed to start or timed out: {exc}"
         ) from exc
-    logger.info("RAW RUN TYPE: %s | RAW RUN: %r", type(run), run)
-    run_status = str(getattr(run, "status", "UNKNOWN"))
+
+    run_status = str(run.get("status", "UNKNOWN"))
     if run_status != "SUCCEEDED":
         raise ApifyAPIError(
             f"Actor '{_JOB_DETAIL_ACTOR_ID}' finished with status '{run_status}' "
-            f"(expected 'SUCCEEDED'). Run ID: {getattr(run, 'id', 'N/A')}."
+            f"(expected 'SUCCEEDED'). Run ID: {run.get('id', 'N/A')}."
         )
 
-    dataset_id = getattr(run, "default_dataset_id", None)
+    dataset_id = run.get("defaultDatasetId")
     if not dataset_id:
         raise ApifyAPIError(f"Actor '{_JOB_DETAIL_ACTOR_ID}' returned no dataset ID.")
 
@@ -238,15 +238,15 @@ def _run_search(client: ApifyClient, query: str) -> Optional[list]:
         logger.exception("Actor '%s' failed to start or timed out for query %r: %s", _SEARCH_ACTOR_ID, query, exc)
         return None
 
-    run_status = str(getattr(run, "status", "UNKNOWN"))
+    run_status = str(run.get("status", "UNKNOWN"))
     if run_status != "SUCCEEDED":
         logger.warning(
             "Actor '%s' finished with status '%s' for query %r (Run ID: %s).",
-            _SEARCH_ACTOR_ID, run_status, query, getattr(run, "id", "N/A"),
+            _SEARCH_ACTOR_ID, run_status, query, run.get("id", "N/A"),
         )
         return None
 
-    dataset_id = getattr(run, "default_dataset_id", None)
+    dataset_id = run.get("defaultDatasetId")
     if not dataset_id:
         logger.warning("Actor '%s' returned no dataset ID for query %r.", _SEARCH_ACTOR_ID, query)
         return None
