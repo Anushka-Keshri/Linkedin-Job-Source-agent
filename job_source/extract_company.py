@@ -70,6 +70,13 @@ _EXCLUDED_DOMAINS = {
     "forbes.com", "techcrunch.com", "businessinsider.com", "reuters.com",
     "nytimes.com", "wsj.com", "cnbc.com", "theverge.com", "axios.com",
     "fastcompany.com", "inc.com", "medium.com", "substack.com",
+    # Job aggregators / listing mirrors — republish postings from many
+    # companies, so they can rank highly in a "<company> official website"
+    # search but are never the company's own site.
+    "jobrapido.com", "simplyhired.com", "careerjet.com", "jooble.org",
+    "adzuna.com", "neuvoo.com", "trovit.com", "jobisjob.com",
+    "talent.com", "jobs2careers.com", "recruit.net", "getwork.com",
+    "snagajob.com", "flexjobs.com", "remote.co", "himalayas.app",
 }
 
 
@@ -190,7 +197,7 @@ def _fetch_company_name(client: ApifyClient, job_id: str, source_url: str) -> st
 
 
 def _domain_matches_company(domain: str, company_name: str) -> bool:
-    """True if the domain's root label closely resembles the company name.
+    """True if the domain's registrable name closely resembles the company name.
 
     This is a positive signal that a URL is the company's OWN site, rather
     than relying solely on an ever-growing blocklist of news/media domains
@@ -198,11 +205,23 @@ def _domain_matches_company(domain: str, company_name: str) -> bool:
     "Mercor", this matches "mercor.com" but not "forbes.com" even if a
     Forbes article about Mercor ranks above Mercor's own homepage.
     """
-    root = domain.split(".")[0]
+    labels = domain.split(".")
+    # Use the registrable/second-level label (e.g. "jobrapido" out of
+    # "in.jobrapido.com"), NOT labels[0] — labels[0] is a SUBDOMAIN
+    # (region prefixes like "in.", "us.", "careers.", etc.), and matching
+    # against a short subdomain like "in" produces false positives for
+    # almost any company name containing those two letters. Falls back to
+    # labels[0] only for a bare two-label domain (e.g. "acme.com").
+    root = labels[-2] if len(labels) >= 2 else labels[0]
+
     normalized_name = re.sub(r"[^a-z0-9]", "", company_name.lower())
     normalized_root = re.sub(r"[^a-z0-9]", "", root.lower())
     if not normalized_name or not normalized_root:
         return False
+    # Guard against short/generic roots (e.g. "co", "hr", "in") producing
+    # spurious substring matches against almost any company name.
+    if len(normalized_root) < 4:
+        return normalized_root == normalized_name
     ratio = difflib.SequenceMatcher(None, normalized_name, normalized_root).ratio()
     return ratio > 0.6 or normalized_name in normalized_root or normalized_root in normalized_name
 
