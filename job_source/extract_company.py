@@ -25,6 +25,7 @@ Typical usage
 
 from __future__ import annotations
 
+import difflib
 import logging
 import os
 import re
@@ -64,6 +65,11 @@ _EXCLUDED_DOMAINS = {
     "crunchbase.com", "bloomberg.com", "google.com", "yelp.com",
     "wellfound.com", "angel.co", "ziprecruiter.com", "monster.com",
     "builtin.com", "pitchbook.com", "owler.com", "tiktok.com",
+    # News/media outlets — can outrank a smaller/newer company's own
+    # homepage for certain queries (e.g. a high-profile feature article).
+    "forbes.com", "techcrunch.com", "businessinsider.com", "reuters.com",
+    "nytimes.com", "wsj.com", "cnbc.com", "theverge.com", "axios.com",
+    "fastcompany.com", "inc.com", "medium.com", "substack.com",
 }
 
 
@@ -183,6 +189,24 @@ def _fetch_company_name(client: ApifyClient, job_id: str, source_url: str) -> st
 # ---------------------------------------------------------------------------
 
 
+def _domain_matches_company(domain: str, company_name: str) -> bool:
+    """True if the domain's root label closely resembles the company name.
+
+    This is a positive signal that a URL is the company's OWN site, rather
+    than relying solely on an ever-growing blocklist of news/media domains
+    (which can never be complete — see _EXCLUDED_DOMAINS). E.g. for
+    "Mercor", this matches "mercor.com" but not "forbes.com" even if a
+    Forbes article about Mercor ranks above Mercor's own homepage.
+    """
+    root = domain.split(".")[0]
+    normalized_name = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    normalized_root = re.sub(r"[^a-z0-9]", "", root.lower())
+    if not normalized_name or not normalized_root:
+        return False
+    ratio = difflib.SequenceMatcher(None, normalized_name, normalized_root).ratio()
+    return ratio > 0.6 or normalized_name in normalized_root or normalized_root in normalized_name
+
+
 def _resolve_company_website(client: ApifyClient, company_name: str) -> str:
     # Try a couple of query phrasings — a quoted "official website" query
     # sometimes triggers Google's AI Overview panel, which this scraper
@@ -192,6 +216,8 @@ def _resolve_company_website(client: ApifyClient, company_name: str) -> str:
     queries = [f'"{company_name}" official website', company_name]
 
     last_had_zero_results = False
+    fallback_url: Optional[str] = None
+
     for query in queries:
         organic = _run_search(client, query)
         if organic is None:
@@ -201,6 +227,7 @@ def _resolve_company_website(client: ApifyClient, company_name: str) -> str:
             logger.warning("Query %r returned zero organic results — trying next query if any.", query)
             continue
 
+        found_any_non_excluded = False
         for result in organic:
             url = (result.get("url") or "").strip()
             if not url:
@@ -208,10 +235,26 @@ def _resolve_company_website(client: ApifyClient, company_name: str) -> str:
             domain = urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
             if any(domain == d or domain.endswith("." + d) for d in _EXCLUDED_DOMAINS):
                 continue
-            logger.info("Resolved website for %r: %s", company_name, url)
-            return url
-        # Got organic results but all were excluded domains — try next query too.
-        logger.warning("Query %r returned only social/aggregator domains — trying next query if any.", query)
+            found_any_non_excluded = True
+            if _domain_matches_company(domain, company_name):
+                logger.info("Resolved website for %r (name match): %s", company_name, url)
+                return url
+            if fallback_url is None:
+                # Keep the first plausible non-excluded result as a backup,
+                # in case no result's domain closely resembles the company
+                # name (e.g. company uses a stylized/unrelated domain).
+                fallback_url = url
+
+        if not found_any_non_excluded:
+            # Got organic results but all were excluded domains — try next query too.
+            logger.warning("Query %r returned only social/aggregator/news domains — trying next query if any.", query)
+
+    if fallback_url:
+        logger.warning(
+            "No domain closely matched company name %r — falling back to first "
+            "plausible non-excluded result: %s", company_name, fallback_url,
+        )
+        return fallback_url
 
     if last_had_zero_results:
         raise CompanyWebsiteMissingError(
@@ -221,7 +264,7 @@ def _resolve_company_website(client: ApifyClient, company_name: str) -> str:
         )
     raise CompanyWebsiteMissingError(
         f"Could not resolve an official website for {company_name!r} — "
-        "only social/aggregator domains appeared in the search results."
+        "only social/aggregator/news domains appeared in the search results."
     )
 
 
