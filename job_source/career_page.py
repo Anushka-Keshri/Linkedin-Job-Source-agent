@@ -136,7 +136,21 @@ _CAREER_FALSE_POSITIVE_HINTS = re.compile(
 )
 
 _LISTING_ONLY_HINTS = re.compile(
-    r"^/(careers?|jobs?|hiring)/?$", re.IGNORECASE
+    r"^/(careers?|jobs?|hiring)(/(careers?|jobs?|openings?|positions?|listings?))?/?$",
+    re.IGNORECASE,
+)
+
+# Explicit "search/view jobs" call-to-action phrasing — the strongest
+# possible signal that a link leads to the ACTUAL listings, as distinct
+# from a careers landing/intro page. E.g. many company career pages are a
+# landing page (mission, culture, benefits) with a "Search Jobs" or "View
+# Open Roles" button/link that leads to a DIFFERENT, deeper URL holding
+# the real listings (e.g. spacex.com/careers -> spacex.com/careers/jobs).
+_JOBS_SUBPAGE_HINT = re.compile(
+    r"\bfind\s*jobs?\b|\bsearch\s*jobs?\b|\bview\s*(all\s*)?(jobs?|openings?|positions?)\b|"
+    r"\bbrowse\s*(jobs?|openings?)\b|\bopen\s*(roles?|positions?)\b|"
+    r"\ball\s*(jobs?|openings?)\b",
+    re.IGNORECASE,
 )
 
 # External job boards/aggregators — even if a company's homepage links out
@@ -154,6 +168,28 @@ def _is_external_job_board(url: str) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in _EXTERNAL_JOB_BOARD_DOMAINS)
 
 
+# A link to an ATS platform might point to one SPECIFIC job posting rather
+# than the general listings board — e.g. a page with hundreds of job cards
+# might have its FIRST such link happen to be one particular opening
+# (boards.greenhouse.io/spacex/jobs/8557110002) rather than the board root
+# (boards.greenhouse.io/spacex). The assignment wants the LISTINGS page,
+# not one individual opening, so any such link is normalized back to its
+# board root before being returned.
+_ATS_JOB_ID_STRIP_PATTERNS = [
+    (re.compile(r"^(https?://boards\.greenhouse\.io/[^/]+)/jobs/\d+.*", re.IGNORECASE), r"\1"),
+    (re.compile(r"^(https?://job-boards\.greenhouse\.io/[^/]+)/jobs/\d+.*", re.IGNORECASE), r"\1"),
+    (re.compile(r"^(https?://jobs\.lever\.co/[^/]+)/[a-f0-9-]{20,}.*", re.IGNORECASE), r"\1"),
+    (re.compile(r"^(https?://jobs\.ashbyhq\.com/[^/]+)/[a-f0-9-]{20,}.*", re.IGNORECASE), r"\1"),
+]
+
+
+def _normalize_ats_url(url: str) -> str:
+    for pattern, replacement in _ATS_JOB_ID_STRIP_PATTERNS:
+        if pattern.match(url):
+            return pattern.sub(replacement, url)
+    return url
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -162,8 +198,24 @@ def _is_external_job_board(url: str) -> bool:
 _MAX_HOPS = 3  # homepage -> careers landing -> real listings page, with headroom
 
 
+def _looks_like_final_listing_page(url: str) -> bool:
+    """True if this URL's own path already looks like the destination
+    listings page (e.g. /careers/jobs, /jobs) rather than a landing page
+    still one hop away from the real listings."""
+    path = urllib.parse.urlparse(url).path
+    return bool(_LISTING_ONLY_HINTS.match(path))
+
+
 def find_job_listing_page(company_website: str) -> ListingResult:
-    """Resolve a company's job LISTINGS page (own domain or ATS platform).
+    """Resolve a company's job LISTINGS page.
+
+    Preference order: the company's OWN domain listings page wins if one
+    can be found there (Strategies B/C, following hops from the homepage
+    toward the real listings). A known ATS platform link (Greenhouse,
+    Lever, Ashby, Workday, etc.) is used only as a FALLBACK — when the
+    own-domain hop chain runs dry on a page that doesn't itself already
+    look like a final listings page (e.g. a landing page that embeds a
+    third-party ATS board rather than hosting listings directly).
 
     Raises
     ------
@@ -173,11 +225,6 @@ def find_job_listing_page(company_website: str) -> ListingResult:
         If no plausible listings page could be located by any strategy.
     """
     homepage_links, homepage_url = _fetch_and_extract(company_website)
-
-    # --- Strategy A: ATS link already on the homepage -------------------
-    ats_hit = _find_ats_link(homepage_links)
-    if ats_hit:
-        return ListingResult(ats_hit, method="ats")
 
     # --- Strategy B: heuristic careers-link scan on the homepage --------
     current_url = _find_career_link_heuristic(homepage_links)
@@ -189,17 +236,20 @@ def find_job_listing_page(company_website: str) -> ListingResult:
         method = "llm"
 
     if not current_url:
+        # Nothing at all found on the company's own domain — fall back to
+        # an ATS link on the homepage, if one exists.
+        ats_hit = _find_ats_link(homepage_links)
+        if ats_hit:
+            return ListingResult(ats_hit, method="ats")
         raise CareerPageNotFoundError(
             f"Could not locate a job listings page from {company_website}"
         )
 
     # The link we found might itself just be a landing/marketing page that
-    # further links to the real listings — either a third-party ATS, or
-    # (just as common) the company's OWN secondary subdomain, e.g. a
-    # "careers.company.com" landing page that links onward to
-    # "apply.careers.company.com/careers?..." for the actual listings.
-    # Keep following the strongest next hop until nothing better appears,
-    # up to a small hop limit so we can't loop forever on a weird site.
+    # further links to the real listings — either the company's OWN
+    # secondary subdomain/sub-path, or (only as a fallback) a third-party
+    # ATS. Keep following the strongest next hop until nothing better
+    # appears, up to a small hop limit so we can't loop forever.
     visited = {current_url}
     for _ in range(_MAX_HOPS):
         try:
@@ -209,15 +259,25 @@ def find_job_listing_page(company_website: str) -> ListingResult:
             # the previous hop — return it rather than failing outright.
             break
 
-        ats_hit = _find_ats_link(page_links)
-        if ats_hit:
-            return ListingResult(ats_hit, method="ats")
-
         next_url = _find_career_link_heuristic(page_links)
-        if not next_url or next_url in visited or next_url == current_url:
-            break  # nothing new/better found — this page is the answer
-        visited.add(next_url)
-        current_url = next_url
+        if next_url and next_url not in visited and next_url != current_url:
+            # Still making progress toward a more specific own-domain
+            # page — keep going before considering any ATS fallback.
+            visited.add(next_url)
+            current_url = next_url
+            continue
+
+        # No further own-domain candidate found on this page. If this
+        # page doesn't already look like the final listings page itself,
+        # it may just be a landing page that embeds a third-party ATS
+        # board rather than hosting listings directly — check for that
+        # ONLY as a fallback, since the own-domain page (once we're
+        # already on the real listings) should win.
+        if not _looks_like_final_listing_page(current_url):
+            ats_hit = _find_ats_link(page_links)
+            if ats_hit:
+                return ListingResult(ats_hit, method="ats")
+        break
 
     return ListingResult(current_url, method=method)
 
@@ -362,7 +422,7 @@ def _find_ats_link(links: list[tuple[str, str]]) -> Optional[str]:
     for href, _text in links:
         domain = _domain(href)
         if any(domain == d or domain.endswith("." + d) for d in _ATS_DOMAINS):
-            return href
+            return _normalize_ats_url(href)
     return None
 
 
@@ -387,6 +447,10 @@ def _find_career_link_heuristic(links: list[tuple[str, str]]) -> Optional[str]:
             score -= 2  # e.g. news.company.com — unlikely to be the real hub
         if _LISTING_ONLY_HINTS.match(path):
             score += 4
+        if _JOBS_SUBPAGE_HINT.search(text):
+            score += 8  # strongest signal: an explicit "search/view jobs" CTA,
+            # distinguishing a landing page's link to the REAL listings from
+            # the landing page itself (e.g. "Search Jobs" -> /careers/jobs)
         if _STRONG_HIRE_HINTS.search(text):
             score += 3
         if _STRONG_HIRE_HINTS.search(path):
@@ -424,7 +488,7 @@ def _find_career_link_heuristic(links: list[tuple[str, str]]) -> Optional[str]:
 # `completion.choices[0].message.content` came back EMPTY every single
 # time (confirmed across multiple companies/sites in testing). A fast
 # instruct model answers directly with no hidden reasoning phase.
-_LLM_MODEL = os.getenv("GROQ_PICKER_MODEL", "llama-3.1-8b-instant")
+_LLM_MODEL = os.getenv("GROQ_PICKER_MODEL", "openai/gpt-oss-20b")
 
 
 def _llm_pick_link(links: list[tuple[str, str]], page_url: str, goal: str) -> Optional[str]:
