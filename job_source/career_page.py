@@ -147,7 +147,7 @@ _LISTING_ONLY_HINTS = re.compile(
 # Open Roles" button/link that leads to a DIFFERENT, deeper URL holding
 # the real listings (e.g. spacex.com/careers -> spacex.com/careers/jobs).
 _JOBS_SUBPAGE_HINT = re.compile(
-    r"\bfind\s*jobs?\b|\bsearch\s*jobs?\b|\bview\s*(all\s*)?(jobs?|openings?|positions?)\b|"
+    r"\bsearch\s*jobs?\b|\bview\s*(all\s*)?(jobs?|openings?|positions?)\b|"
     r"\bbrowse\s*(jobs?|openings?)\b|\bopen\s*(roles?|positions?)\b|"
     r"\ball\s*(jobs?|openings?)\b",
     re.IGNORECASE,
@@ -226,6 +226,19 @@ def find_job_listing_page(company_website: str) -> ListingResult:
     """
     homepage_links, homepage_url = _fetch_and_extract(company_website)
 
+    # An explicit ATS link found directly on the homepage (even with plain
+    # text like "Careers") is a strong, reliable signal — check for it
+    # BEFORE running the heuristic scan. This matters because a heuristic
+    # score can be misled by an unrelated own-domain page that happens to
+    # score higher on keywords/subdomain patterns (e.g. a company's own
+    # "jobs." subdomain being their own product, not a listings page) even
+    # though the real answer — a plain "Careers" link to Greenhouse/Lever/
+    # Ashby/Workable — is sitting right there on the homepage with a lower
+    # heuristic score simply because its link text is generic.
+    homepage_ats_hit = _find_ats_link(homepage_links)
+    if homepage_ats_hit:
+        return ListingResult(homepage_ats_hit, method="ats")
+
     # --- Strategy B: heuristic careers-link scan on the homepage --------
     current_url = _find_career_link_heuristic(homepage_links)
     method = "heuristic"
@@ -236,11 +249,8 @@ def find_job_listing_page(company_website: str) -> ListingResult:
         method = "llm"
 
     if not current_url:
-        # Nothing at all found on the company's own domain — fall back to
-        # an ATS link on the homepage, if one exists.
-        ats_hit = _find_ats_link(homepage_links)
-        if ats_hit:
-            return ListingResult(ats_hit, method="ats")
+        # Homepage ATS was already checked above and found nothing, and
+        # heuristic/LLM found nothing own-domain either.
         raise CareerPageNotFoundError(
             f"Could not locate a job listings page from {company_website}"
         )
@@ -488,7 +498,7 @@ def _find_career_link_heuristic(links: list[tuple[str, str]]) -> Optional[str]:
 # `completion.choices[0].message.content` came back EMPTY every single
 # time (confirmed across multiple companies/sites in testing). A fast
 # instruct model answers directly with no hidden reasoning phase.
-_LLM_MODEL = os.getenv("GROQ_PICKER_MODEL", "openai/gpt-oss-20b")
+_LLM_MODEL = os.getenv("GROQ_PICKER_MODEL", "llama-3.1-8b-instant")
 
 
 def _llm_pick_link(links: list[tuple[str, str]], page_url: str, goal: str) -> Optional[str]:
