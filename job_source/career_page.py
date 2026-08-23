@@ -5,16 +5,7 @@ job_source.career_page
 Given a company's official website, finds their job LISTINGS page — the
 page where their current open positions are shown (either on their own
 domain, or on a third-party ATS platform they use, e.g.
-jobs.ashbyhq.com/harvey). This matches the assignment's own example:
-
-    input:  https://www.linkedin.com/jobs/view/4427787182/
-    output: https://jobs.ashbyhq.com/harvey?utm_source=58AzKxpoq0
-
-NOTE: this deliberately stops at the LISTINGS page — it does not drill
-down into one specific job posting. An earlier version of this module did
-that; it was simplified after the assignment brief clarified the goal is
-"get to job listing page of individual company's website", not one
-specific opening.
+jobs.ashbyhq.com/harvey). 
 
 Strategy (fastest/most reliable first, most expensive/general last):
   A. ATS detection      — if the site links to a known applicant-tracking
@@ -28,12 +19,6 @@ Strategy (fastest/most reliable first, most expensive/general last):
                            careers/jobs link. Slow path, used only when
                            heuristics fail.
 
-Typical usage
--------------
-    from job_source.career_page import find_job_listing_page
-
-    result = find_job_listing_page("https://www.acmecorp.com")
-    print(result.listing_url, result.method)
 """
 
 from __future__ import annotations
@@ -498,7 +483,7 @@ def _find_career_link_heuristic(links: list[tuple[str, str]]) -> Optional[str]:
 # `completion.choices[0].message.content` came back EMPTY every single
 # time (confirmed across multiple companies/sites in testing). A fast
 # instruct model answers directly with no hidden reasoning phase.
-_LLM_MODEL = os.getenv("GROQ_PICKER_MODEL", "llama-3.1-8b-instant")
+_LLM_MODEL = os.getenv("GROQ_PICKER_MODEL", "openai/gpt-oss-20b")
 
 
 def _llm_pick_link(links: list[tuple[str, str]], page_url: str, goal: str) -> Optional[str]:

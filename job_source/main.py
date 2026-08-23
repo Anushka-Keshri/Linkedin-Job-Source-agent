@@ -8,10 +8,6 @@ End-to-end pipeline for the "LinkedIn Job Source agent" challenge:
         -> (1) company name + company website   [extract_company.py]
         -> (2) job listings page URL             [career_page.py]
 
-Matches the assignment's own example:
-    input:  https://www.linkedin.com/jobs/view/4427787182/
-    output: https://jobs.ashbyhq.com/harvey?utm_source=58AzKxpoq0
-
 Usage
 -----
     python -m job_source.main "https://www.linkedin.com/jobs/view/<job_id>/"
